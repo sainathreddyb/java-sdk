@@ -9,25 +9,25 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
-import io.modelcontextprotocol.common.McpTransportContext;
-import io.modelcontextprotocol.spec.McpError;
-import io.modelcontextprotocol.spec.McpSchema;
-import io.modelcontextprotocol.spec.McpServerSession;
-import io.modelcontextprotocol.json.TypeRef;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import reactor.core.publisher.Mono;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import org.mockito.Mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.MockitoAnnotations;
+
+import io.modelcontextprotocol.common.McpTransportContext;
+import io.modelcontextprotocol.json.TypeRef;
+import io.modelcontextprotocol.spec.McpError;
+import io.modelcontextprotocol.spec.McpSchema;
+import io.modelcontextprotocol.spec.McpServerSession;
+import reactor.core.publisher.Mono;
 
 /**
  * Tests for {@link McpSyncServerExchange}.
@@ -458,6 +458,49 @@ class McpSyncServerExchangeTests {
 		assertThatThrownBy(() -> exchangeWithElicitation.createElicitation(elicitRequest))
 			.isInstanceOf(RuntimeException.class)
 			.hasMessage("Session communication error");
+	}
+
+	// ---------------------------------------
+	// URL Elicitation Capability Gate Tests
+	// ---------------------------------------
+
+	@Test
+	void testSendElicitationCompleteWithoutUrlCapability() {
+		// Given - Create exchange with Elicitation() (no url capability)
+		McpSchema.ClientCapabilities capabilitiesWithElicitation = McpSchema.ClientCapabilities.builder()
+			.elicitation()
+			.build();
+
+		McpAsyncServerExchange asyncExchangeWithElicitation = new McpAsyncServerExchange("testSessionId", mockSession,
+				capabilitiesWithElicitation, clientInfo, McpTransportContext.EMPTY);
+		McpSyncServerExchange exchangeWithElicitation = new McpSyncServerExchange(asyncExchangeWithElicitation);
+
+		assertThatThrownBy(() -> exchangeWithElicitation.sendElicitationComplete("abc"))
+			.isInstanceOf(IllegalStateException.class)
+			.hasMessage("Client must be configured with URL elicitation capabilities");
+
+		// Verify that sendNotification was never called
+		verify(mockSession, never()).sendNotification(eq(McpSchema.METHOD_NOTIFICATION_ELICITATION_COMPLETE), any());
+	}
+
+	@Test
+	void testSendElicitationCompleteWithUrlCapability() {
+		// Given - Create exchange with Elicitation(form, url)
+		McpSchema.ClientCapabilities capabilitiesWithUrl = McpSchema.ClientCapabilities.builder()
+			.elicitation(true, true)
+			.build();
+
+		McpAsyncServerExchange asyncExchangeWithUrl = new McpAsyncServerExchange("testSessionId", mockSession,
+				capabilitiesWithUrl, clientInfo, McpTransportContext.EMPTY);
+		McpSyncServerExchange exchangeWithUrl = new McpSyncServerExchange(asyncExchangeWithUrl);
+
+		when(mockSession.sendNotification(eq(McpSchema.METHOD_NOTIFICATION_ELICITATION_COMPLETE), any()))
+			.thenReturn(Mono.empty());
+
+		exchangeWithUrl.sendElicitationComplete("abc");
+
+		// Verify that sendNotification was called
+		verify(mockSession, times(1)).sendNotification(eq(McpSchema.METHOD_NOTIFICATION_ELICITATION_COMPLETE), any());
 	}
 
 	// ---------------------------------------

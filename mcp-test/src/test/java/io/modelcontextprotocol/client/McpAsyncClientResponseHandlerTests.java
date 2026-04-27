@@ -8,6 +8,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import io.modelcontextprotocol.json.TypeRef;
@@ -557,6 +560,71 @@ class McpAsyncClientResponseHandlerTests {
 		assertThat(response.error()).isNull();
 		assertThat(response.result()).isInstanceOf(Map.class);
 		assertThat(((Map<?, ?>) response.result())).isEmpty();
+
+		asyncMcpClient.closeGracefully();
+	}
+
+	@Test
+	void testElicitationCompleteNotificationHandling() throws InterruptedException {
+		MockMcpClientTransport transport = initializationEnabledTransport();
+
+		// Track received notifications
+		AtomicReference<McpSchema.ElicitationCompleteNotification> received = new AtomicReference<>();
+		CountDownLatch latch = new CountDownLatch(1);
+
+		// Create a consumer for elicitation complete notifications
+		Function<McpSchema.ElicitationCompleteNotification, Mono<Void>> elicitationCompleteConsumer = notification -> Mono
+			.fromRunnable(() -> {
+				received.set(notification);
+				latch.countDown();
+			});
+
+		// Create client with elicitation complete consumer
+		McpAsyncClient asyncMcpClient = McpClient.async(transport)
+			.elicitationCompleteConsumer(elicitationCompleteConsumer)
+			.build();
+
+		assertThat(asyncMcpClient.initialize().block()).isNotNull();
+
+		// Simulate server sending notifications/elicitation/complete notification
+		McpSchema.ElicitationCompleteNotification completeNotification = new McpSchema.ElicitationCompleteNotification(
+				"test-elicitation-id", null);
+		McpSchema.JSONRPCNotification notification = new McpSchema.JSONRPCNotification(McpSchema.JSONRPC_VERSION,
+				McpSchema.METHOD_NOTIFICATION_ELICITATION_COMPLETE, completeNotification);
+		transport.simulateIncomingMessage(notification);
+
+		// Wait for the consumer to be invoked
+		assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue();
+
+		// Verify the consumer received the correct elicitationId
+		assertThat(received.get()).isNotNull();
+		assertThat(received.get().elicitationId()).isEqualTo("test-elicitation-id");
+
+		asyncMcpClient.closeGracefully();
+	}
+
+	@Test
+	void testElicitationCompleteNotificationWithoutConsumer() throws InterruptedException {
+		MockMcpClientTransport transport = initializationEnabledTransport();
+
+		// Create client WITHOUT an elicitation complete consumer
+		McpAsyncClient asyncMcpClient = McpClient.async(transport).build();
+
+		assertThat(asyncMcpClient.initialize().block()).isNotNull();
+
+		// Simulate server sending notifications/elicitation/complete notification
+		// This should be silently ignored without error
+		McpSchema.ElicitationCompleteNotification completeNotification = new McpSchema.ElicitationCompleteNotification(
+				"test-elicitation-id", null);
+		McpSchema.JSONRPCNotification notification = new McpSchema.JSONRPCNotification(McpSchema.JSONRPC_VERSION,
+				McpSchema.METHOD_NOTIFICATION_ELICITATION_COMPLETE, completeNotification);
+		transport.simulateIncomingMessage(notification);
+
+		// Give the async pipeline time to process
+		Thread.sleep(500);
+
+		// Verify no error occurred — client is still functional
+		assertThat(asyncMcpClient.isInitialized()).isTrue();
 
 		asyncMcpClient.closeGracefully();
 	}
