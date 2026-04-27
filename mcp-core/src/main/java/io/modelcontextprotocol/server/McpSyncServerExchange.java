@@ -101,6 +101,15 @@ public class McpSyncServerExchange {
 	}
 
 	/**
+	 * Sends a notification to the client that an out-of-band URL elicitation interaction
+	 * has completed.
+	 * @param elicitationId The ID of the elicitation that completed
+	 */
+	public void sendElicitationComplete(String elicitationId) {
+		this.exchange.sendElicitationComplete(elicitationId).block();
+	}
+
+	/**
 	 * Retrieves the list of all roots provided by the client.
 	 * @return The list of roots result.
 	 */

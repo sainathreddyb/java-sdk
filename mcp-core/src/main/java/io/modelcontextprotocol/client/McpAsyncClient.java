@@ -297,6 +297,16 @@ public class McpAsyncClient {
 		notificationHandlers.put(McpSchema.METHOD_NOTIFICATION_PROGRESS,
 				asyncProgressNotificationHandler(progressConsumersFinal));
 
+		// Elicitation Complete Notification
+		List<Function<McpSchema.ElicitationCompleteNotification, Mono<Void>>> elicitationCompleteConsumersFinal = new ArrayList<>();
+		elicitationCompleteConsumersFinal
+			.add((notification) -> Mono.fromRunnable(() -> logger.debug("Elicitation complete: {}", notification)));
+		if (!Utils.isEmpty(features.elicitationCompleteConsumers())) {
+			elicitationCompleteConsumersFinal.addAll(features.elicitationCompleteConsumers());
+		}
+		notificationHandlers.put(McpSchema.METHOD_NOTIFICATION_ELICITATION_COMPLETE,
+				asyncElicitationCompleteNotificationHandler(elicitationCompleteConsumersFinal));
+
 		Function<Initialization, Mono<Void>> postInitializationHook = init -> {
 
 			if (init.initializeResult().capabilities().tools() == null || !enableCallToolSchemaCaching) {
@@ -1035,6 +1045,20 @@ public class McpAsyncClient {
 
 			return Flux.fromIterable(progressConsumers)
 				.flatMap(consumer -> consumer.apply(progressNotification))
+				.then();
+		};
+	}
+
+	private NotificationHandler asyncElicitationCompleteNotificationHandler(
+			List<Function<McpSchema.ElicitationCompleteNotification, Mono<Void>>> elicitationCompleteConsumers) {
+
+		return params -> {
+			McpSchema.ElicitationCompleteNotification notification = transport.unmarshalFrom(params,
+					new TypeRef<McpSchema.ElicitationCompleteNotification>() {
+					});
+
+			return Flux.fromIterable(elicitationCompleteConsumers)
+				.flatMap(consumer -> consumer.apply(notification))
 				.then();
 		};
 	}

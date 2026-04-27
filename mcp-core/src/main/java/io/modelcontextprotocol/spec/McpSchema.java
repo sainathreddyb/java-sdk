@@ -10,6 +10,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -17,11 +20,10 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.TypeRef;
 import io.modelcontextprotocol.util.Assert;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Based on the <a href="http://www.jsonrpc.org/specification">JSON-RPC 2.0
@@ -106,6 +108,8 @@ public final class McpSchema {
 	// Elicitation Methods
 	public static final String METHOD_ELICITATION_CREATE = "elicitation/create";
 
+	public static final String METHOD_NOTIFICATION_ELICITATION_COMPLETE = "notifications/elicitation/complete";
+
 	// ---------------------------
 	// JSON-RPC Error Codes
 	// ---------------------------
@@ -143,6 +147,12 @@ public final class McpSchema {
 		 * Resource not found.
 		 */
 		public static final int RESOURCE_NOT_FOUND = -32002;
+
+		/**
+		 * URL elicitation required. The server requires the client to complete a URL mode
+		 * elicitation before the request can proceed.
+		 */
+		public static final int URL_ELICITATION_REQUIRED = -32042;
 
 	}
 
@@ -2051,21 +2061,32 @@ public final class McpSchema {
 	 * A request from the server to elicit additional information from the user via the
 	 * client.
 	 *
+	 * @param mode The elicitation mode: "form", "url", or null (defaults to form)
 	 * @param message The message to present to the user
 	 * @param requestedSchema A restricted subset of JSON Schema. Only top-level
-	 * properties are allowed, without nesting
+	 * properties are allowed, without nesting. Only valid for form mode.
+	 * @param url The URL for the user to visit (URL mode only)
+	 * @param elicitationId A unique identifier for this elicitation (URL mode only)
 	 * @param meta See specification for notes on _meta usage
 	 */
 	@JsonInclude(JsonInclude.Include.NON_ABSENT)
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record ElicitRequest( // @formatter:off
+		@JsonProperty("mode") String mode,
 		@JsonProperty("message") String message,
 		@JsonProperty("requestedSchema") Map<String, Object> requestedSchema,
+		@JsonProperty("url") String url,
+		@JsonProperty("elicitationId") String elicitationId,
 		@JsonProperty("_meta") Map<String, Object> meta) implements Request { // @formatter:on
 
-		// backwards compatibility constructor
+		// backwards compatibility constructor (form mode, no meta)
 		public ElicitRequest(String message, Map<String, Object> requestedSchema) {
-			this(message, requestedSchema, null);
+			this(null, message, requestedSchema, null, null, null);
+		}
+
+		// backwards compatibility constructor (form mode, with meta)
+		public ElicitRequest(String message, Map<String, Object> requestedSchema, Map<String, Object> meta) {
+			this(null, message, requestedSchema, null, null, meta);
 		}
 
 		public static Builder builder() {
@@ -2074,11 +2095,22 @@ public final class McpSchema {
 
 		public static class Builder {
 
+			private String mode;
+
 			private String message;
 
 			private Map<String, Object> requestedSchema;
 
+			private String url;
+
+			private String elicitationId;
+
 			private Map<String, Object> meta;
+
+			public Builder mode(String mode) {
+				this.mode = mode;
+				return this;
+			}
 
 			public Builder message(String message) {
 				this.message = message;
@@ -2087,6 +2119,16 @@ public final class McpSchema {
 
 			public Builder requestedSchema(Map<String, Object> requestedSchema) {
 				this.requestedSchema = requestedSchema;
+				return this;
+			}
+
+			public Builder url(String url) {
+				this.url = url;
+				return this;
+			}
+
+			public Builder elicitationId(String elicitationId) {
+				this.elicitationId = elicitationId;
 				return this;
 			}
 
@@ -2104,7 +2146,18 @@ public final class McpSchema {
 			}
 
 			public ElicitRequest build() {
-				return new ElicitRequest(message, requestedSchema, meta);
+				if ("url".equals(this.mode)) {
+					if (this.url == null) {
+						throw new IllegalArgumentException("url must be non-null when mode is 'url'");
+					}
+					if (this.elicitationId == null) {
+						throw new IllegalArgumentException("elicitationId must be non-null when mode is 'url'");
+					}
+					if (this.requestedSchema != null) {
+						throw new IllegalArgumentException("requestedSchema must not be set when mode is 'url'");
+					}
+				}
+				return new ElicitRequest(mode, message, requestedSchema, url, elicitationId, meta);
 			}
 
 		}
@@ -2261,6 +2314,20 @@ public final class McpSchema {
 		public ResourcesUpdatedNotification(String uri) {
 			this(uri, null);
 		}
+	}
+
+	/**
+	 * A notification from the server to the client indicating that an out-of-band URL
+	 * elicitation interaction has completed.
+	 *
+	 * @param elicitationId The ID of the elicitation that completed
+	 * @param meta See specification for notes on _meta usage
+	 */
+	@JsonInclude(JsonInclude.Include.NON_ABSENT)
+	@JsonIgnoreProperties(ignoreUnknown = true)
+	public record ElicitationCompleteNotification(// @formatter:off
+		@JsonProperty("elicitationId") String elicitationId,
+		@JsonProperty("_meta") Map<String, Object> meta) implements Notification { // @formatter:on
 	}
 
 	/**
